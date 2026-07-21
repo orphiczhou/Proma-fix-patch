@@ -1,0 +1,6 @@
+@echo off
+REM Proma-Pro (patched {{VERSION}}: cross-channel subagent + green icon + pro data dir)
+REM PROMA_DEV=1 -> data dir ~/.proma-pro, electron userData @proma/electron-pro
+REM PromaPro.exe = green-iconed copy (original Proma.exe kept untouched)
+set PROMA_DEV=1
+start "" "%~dp0PromaPro.exe"
