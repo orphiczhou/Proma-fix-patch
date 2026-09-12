@@ -117,6 +117,9 @@ cp "$DEST/Proma.exe" "$DEST/PromaPro.exe"
 "$NODE" "$SKILL/scripts/set-exe-icon.cjs" "$DEST/PromaPro.exe" "$SKILL/assets/green.ico"
 # 6. icon.ico 补齐（0.19.53+：消除 "App icon not found" 告警，统一绿图标）
 mkdir -p "$DEST/resources/app/dist/resources"
+# assets/green.ico 应为 408142 字节（绿色多尺寸）；缺失或不确定时从 proma-emerald.png 重建：
+# node "$SKILL/scripts/build-ico.cjs" "$DEST/resources/proma-logos/proma-emerald.png" "$SKILL/assets/green.ico"
+# 警告：不要从旧部署目录复制 icon.ico——那是官方黑白 logo（见 known-pitfalls #10）
 cp "$SKILL/assets/green.ico" "$DEST/resources/app/dist/resources/icon.ico"
 cp "$SKILL/assets/green.ico" "$DEST/resources/icon.ico"
 # 7. 禁用自动更新（防官方升级覆盖 patch！）
