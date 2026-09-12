@@ -1,6 +1,6 @@
 ---
 name: proma-pro-repatch
-description: 把 Proma 桌面应用（官方安装版）改造成 Pro 定制版——注入跨渠道协作子会话（开子会话时可选任意已启用渠道的模型）+ GPT-5.6 家族 1M 上下文（含池化变体，官方默认 200k/372k）+ Pro 数据隔离（~/.proma-pro，可与原版共存）+ 绿色图标 + 禁用自动更新（防 patch 被官方升级覆盖）。当用户要把 Proma 升级到新主线版本并重新打补丁、或提到"改造 Pro 版 / 跨渠道子会话 / 1M 上下文 / 重新打包 Proma-Pro / Proma 版本升级补丁 / Pro 副本 / proma-pro"时，务必使用本 skill。打包了完整补丁脚本、asar 工具、rcedit 图标工具链和 node_modules，独立自洽，按 6 阶段 SOP 执行：确认源版本 → 提取 main.cjs → 侦察锚点 → 应用补丁 → 审计 → 部署打包。
+description: 把 Proma 桌面应用（官方安装版）改造成 Pro 定制版——注入跨渠道协作子会话（开子会话时可选任意已启用渠道的模型）+ 1M 上下文（GPT-5.6 家族含池化变体，官方默认 200k/372k；智谱 GLM 与 DeepSeek 渠道全模型）+ Pro 数据隔离（~/.proma-pro，可与原版共存）+ 绿色图标 + 禁用自动更新（防 patch 被官方升级覆盖）。当用户要把 Proma 升级到新主线版本并重新打补丁、或提到"改造 Pro 版 / 跨渠道子会话 / 1M 上下文 / 重新打包 Proma-Pro / Proma 版本升级补丁 / Pro 副本 / proma-pro"时，务必使用本 skill。打包了完整补丁脚本、asar 工具、rcedit 图标工具链和 node_modules，独立自洽，按 6 阶段 SOP 执行：确认源版本 → 提取 main.cjs → 侦察锚点 → 应用补丁 → 审计 → 部署打包。
 ---
 
 # Proma-Pro 重新打补丁
@@ -10,7 +10,7 @@ description: 把 Proma 桌面应用（官方安装版）改造成 Pro 定制版�
 ## 四块改造
 
 1. **跨渠道子会话**：开协作子会话时可指定任意已启用渠道的模型（默认只能用父会话当前渠道）。注入 `listEnabledAgentModelsAcrossChannels` + `resolveChannelForAgentModel`，改 `getAvailableAgentModels` 列所有渠道模型、`startDelegation` 经 `effectiveChannelId` 把子会话挂到目标渠道。
-2. **GPT-5.6 家族 1M 上下文**：官方 `inferCodexAlignedGPT5ContextWindow` 只精确匹配无尾缀 ID，渠道池化变体（gpt-5.6-terra-1、sol-az 等）落 200k 兜底。补丁改为前缀匹配并统一 1e6（OpenAI 官方规格 1,050,000）。glm-5.2/5.3、claude、deepseek、kimi-k3、minimax-m3、gemini 等官方已原生 1M，无需补丁。
+2. **1M 上下文（E 组）**：① GPT-5.6 家族及池化变体（gpt-5.6-terra-1、sol-az 等）：官方 switch 只精确匹配无尾缀 ID，变体落 200k 兜底；补丁改前缀匹配统一 1e6（OpenAI 官方规格 1,050,000）。② 智谱 GLM 与 DeepSeek 渠道全模型 1M（用户渠道实际开放；官方规则表只列 glm-5.2/5.3 与 deepseek-v4/flash，补丁改为 "glm-"/"deepseek-" 前缀匹配）。claude、kimi-k3、minimax-m3、qwen、gemini-3.x 官方已原生 1M。
 3. **Pro 数据隔离**：业务数据 `~/.proma-pro`、electron userData `@proma/electron-pro`，与原版（`~/.proma`）完全隔离，单实例锁独立，可与原版同时运行。
 4. **绿色图标 + 禁用自动更新**：托盘用 `proma-emerald.png`、exe 嵌 `green.ico`（改副本 `PromaPro.exe`——原 `Proma.exe` 运行时被锁改不了）；`app-update.yml` 断源防止官方升级覆盖 patch。
 
@@ -85,17 +85,17 @@ cp "$WORK/main-orig.cjs" "$WORK/main-patched.cjs"
 "$NODE" "$SKILL/scripts/patch-main.cjs" "$WORK/main-patched.cjs"
 ```
 
-脚本自动探测 esbuild 变量名、应用 10 补丁点（A1/A2/B1/B2/B3a-d/C/E1）、跑内置验证。**若 throw "期望1处匹配，实际0处"**：该锚点变了，回阶段3按 `references/patch-anchors.md` 适配后重跑。
+脚本自动探测 esbuild 变量名、应用 12 补丁点（A1/A2/B1/B2/B3a-d/C/E1/E2a/E2b）、跑内置验证。**若 throw "期望1处匹配，实际0处"**：该锚点变了，回阶段3按 `references/patch-anchors.md` 适配后重跑。
 
 ### 阶段 5：审计
 
 ```bash
 "$NODE" --check "$WORK/main-patched.cjs"   # 语法
 # 计数验证（0.19.53 期望 across=2, resolve=2, eff=4, promapro=3, promadev=0, elepro=2, eledev=0, emerald=1, e1=1）
-"$NODE" -e "const s=require('fs').readFileSync(process.argv[1],'utf8');const c=x=>s.split(x).length-1;console.log({across:c('listEnabledAgentModelsAcrossChannels'),resolve:c('resolveChannelForAgentModel'),eff:c('effectiveChannelId'),promapro:c('.proma-pro'),promadev:c('.proma-dev'),elepro:c('electron-pro'),eledev:c('electron-dev'),emerald:c('proma-emerald.png'),e1:c('/^gpt-5\\\\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6')});" "$WORK/main-patched.cjs"
+"$NODE" -e "const s=require('fs').readFileSync(process.argv[1],'utf8');const c=x=>s.split(x).length-1;console.log({across:c('listEnabledAgentModelsAcrossChannels'),resolve:c('resolveChannelForAgentModel'),eff:c('effectiveChannelId'),promapro:c('.proma-pro'),promadev:c('.proma-dev'),elepro:c('electron-pro'),eledev:c('electron-dev'),emerald:c('proma-emerald.png'),e2a:c('deepseek: [\"deepseek-\"]'),e2b:c('glm: [\"glm-\"]'),e1:c('/^gpt-5\\\\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6')});" "$WORK/main-patched.cjs"
 ```
 
-对抗性检查（清单见 `references/patch-anchors.md`）：diff orig vs patched 确认改动恰好 10 锚点；`createAgentSession` 其他调用点不应被改；注入函数作用域内 `listChannels`/`getChannelById` 可见。
+对抗性检查（清单见 `references/patch-anchors.md`）：diff orig vs patched 确认改动恰好 12 锚点；`createAgentSession` 其他调用点不应被改；注入函数作用域内 `listChannels`/`getChannelById` 可见。
 
 ### 阶段 6：部署打包
 
@@ -141,7 +141,7 @@ sed 's/{{VERSION}}/<版本>/g' "$SKILL/assets/README.txt.tmpl" > "$DEST/README.t
 - `[更新-updater] Error: net::ERR_CONNECTION_REFUSED` → 自动更新已断源
 - Agent 会话里 `list_available_agent_models` → 所有渠道模型（每个带 channelId）
 - `delegate_agent(modelId=<其他渠道模型id>)` → 子会话跑在该渠道
-- 切到 gpt-5.6-terra-1 / gpt-5.6-sol → 上下文用量条分母为 1M
+- 切到 gpt-5.6-terra-1 / gpt-5.6-sol → 上下文用量条分母为 1M；GLM 渠道任意模型（含 glm-4.7/glm-5-turbo/glm-5.1/GLM-4.6V）与 DeepSeek 渠道任意模型 → 1M
 
 ## 何时改 patch-main.cjs
 
