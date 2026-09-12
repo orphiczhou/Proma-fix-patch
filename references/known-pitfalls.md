@@ -10,10 +10,10 @@
 **正解**：解包后必须 `merge-unpacked.cjs` 把 `app.asar.unpacked/` 合并覆盖到 `app/`。验证：对比 `app/node_modules/**/skia*.node` 与 `app.asar.unpacked/**/skia*.node` 字节一致（0.15.7 与 0.19.53 均为 27,294,720 字节；注意 0.19.53 路径变为嵌套 `@napi-rs/canvas/node_modules/@napi-rs/canvas-win32-x64-msvc/`）。
 **不做的后果**：跨机器加载原生模块失败，canvas 渲染崩溃。
 
-## 3. 中文 \uXXXX 转义
-**现象**：main.cjs 里中文以 `\uXXXX` 存储。
-**坑**：全局 decode 让中文变明文后，正则字面量里的 `\t`/`\n` 也会被解释，`node --check` 报 invalid regex。
-**正解**：patch-main.cjs 的 `enc()` 把匹配串里的真实中文转义成 `\uXXXX` 再匹配，写回保持 ASCII + \uXXXX。绝不全局 decode。
+## 3. 中文转义：注释是明文、字符串才是 \uXXXX（0.19.53 新认知）
+**现象**：main.cjs 里**字符串字面量**的中文以 `\uXXXX` 存储，但**注释**里的中文是明文（esbuild asciiOnly 只作用于字符串）。
+**坑**：匹配串若包含中文注释行，enc() 会把注释汉字转义成 \uXXXX 导致失配（"期望1处匹配，实际0处"）。
+**正解**：patch-main.cjs 的 `enc()` 只用于含中文字符串字面量的匹配串；含注释行的锚点（如 E2）只匹配纯 ASCII 代码行。仍绝不全局 decode。
 
 ## 4. esbuild 变量名漂移
 **现象**：每次 Proma 重新打包，esbuild 给 `import_electron`/`import_path` 分配的编号会变（0.15.7 是 49/11/10，0.19.53 是 59/10/9）。
