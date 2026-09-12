@@ -41,10 +41,11 @@
 **现象**：Electron updater 初始化后"空闲时自动安装"官方新版，整个 resources 目录被替换——app/ 目录、patched main.cjs、app.asar.original 全部没了，Pro 版退化为官方版且数据目录逻辑丢失。
 **正解**：部署时把 `resources/app-update.yml` 的 url 改为 `https://127.0.0.1/proma-pro-auto-update-disabled/`。验证：启动 log 出现 `[更新-updater] Error: net::ERR_CONNECTION_REFUSED`。（0.14.23 旧 Pro 没处理过这个，是长期隐患。）
 
-## 10. icon.ico 缺失告警（0.19.53 新增）
-**现象**：启动 log `App icon not found at: ...resources\app\dist\resources\icon.ico`。
-**原因**：0.19.53 `getIconPath()` 按 `__dirname/resources/icon.ico` 找（asar 内该路径不存在，官方版同样告警，无害）；另有主窗口按 `<resources>/icon.ico` 找。
-**正解**：部署时把 green.ico 复制到 `resources/app/dist/resources/icon.ico` 和 `resources/icon.ico` 两处，消除告警并统一绿图标。
+## 10. icon.ico 缺失告警与黑白 logo 陷阱（0.19.53 实踩）
+**现象**：启动 log `App icon not found at: ...resources\app\dist\resources\icon.ico`（无害告警）；补齐后任务栏窗口图标变黑。
+**根因有两层**：① 0.19.53 `getIconPath2()` 按 `__dirname/resources/icon.ico` 找窗口图标（asar 内不存在，官方版 fallback 到 exe 内嵌图标）；② **旧部署目录（如 0.14.23 的 D:\Proma-Pro\resources\）里的 icon.ico/icon.png 是官方黑白 logo，不是绿色版**——把它当绿图标复制会同时污染窗口 icon 与 rcedit 嵌入的 exe 图标，任务栏变黑。
+**正解**：用 `build-ico.cjs` 从官方 `proma-logos/proma-emerald.png` 重新生成多尺寸绿色 ico（256-16 七档，输出 408,142 字节，与仓库 assets/green.ico 同源可互验）；再复制到 `resources/icon.ico` + `resources/app/dist/resources/icon.ico` 两处，并用它 rcedit。复用任何二进制资源前先视觉确认颜色。
+**验证**：重启后 log 无 "App icon not found"；任务栏窗口按钮为绿色。若 exe 文件图标仍显示旧色，是 Windows 图标缓存延迟（重启 explorer 或等待刷新），不影响任务栏窗口图标。
 
 ## 11. 跨机器部署的 DPAPI/OAuth
 **现象**：渠道 apiKey 用 DPAPI 加密绑 Windows 用户；OAuth 登录态在 electron userData。跨机器复制 channels.json 会解密失败。
