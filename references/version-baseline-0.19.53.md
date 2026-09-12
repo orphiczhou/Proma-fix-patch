@@ -47,6 +47,7 @@
 - `electron-pro` = 2（普通路径 + instance 模板串），`electron-dev` 残留 = 0
 - `proma-emerald.png` = 1
 - `/^gpt-5\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6` = 1
+- `deepseek: ["deepseek-"]` = 1、`glm: ["glm-"]` = 1（E2 全模型 1M）
 
 ## 部署后验证（0.19.53 实测）
 - 启动 log：`[配置] 配置目录: ~/.proma-pro/（开发模式）`
