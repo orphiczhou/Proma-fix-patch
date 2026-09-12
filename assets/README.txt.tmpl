@@ -5,10 +5,12 @@ Proma-Pro 便携部署包（Windows x64，基于 Proma {{VERSION}}）
 基于 Proma {{VERSION}} 的定制版，含四项改动：
   1. 协作子会话跨渠道选模型 —— 开子会话时可用任意已启用渠道的模型
      （delegate_agent / delegate_agents 传其他渠道的 modelId，子会话自动挂到该渠道运行）
-  2. GPT-5.6 家族 1M 上下文 —— gpt-5.6-sol/terra/luna 及其池化变体
-     （gpt-5.6-terra-1、gpt-5.6-sol-az 等）contextWindow 从 200k/372k 提到 1M
-     （OpenAI 官方规格 1,050,000 token；glm-5.2/5.3、claude、deepseek、kimi-k3、
-      minimax-m3、gemini 等官方 0.19.53 已原生支持 1M，无需补丁）
+  2. 1M 上下文（两层）：
+     a) GPT-5.6 家族及池化变体（gpt-5.6-terra-1、gpt-5.6-sol-az 等）从 200k/372k 提到 1M
+        （OpenAI 官方规格 1,050,000 token）
+     b) 智谱 GLM 与 DeepSeek 渠道全模型 1M（含 glm-4.x/5/5-turbo/5.1、GLM-4.6V、
+        deepseek 全系；渠道实际开放，官方目录未逐一标注）
+     claude、kimi-k3、minimax-m3、qwen、gemini-3.x 等官方 0.19.53 已原生支持 1M
   3. 绿色图标（托盘 proma-emerald + exe 图标）
   4. 独立数据目录 ~/.proma-pro，可与原版 Proma 同时运行、互不影响
 
@@ -36,10 +38,14 @@ Proma-Pro 便携部署包（Windows x64，基于 Proma {{VERSION}}）
   - delegate_agent(task=..., modelId=<其他渠道的模型id>) → 子会话会跑在该渠道上
 
 【验证 1M 上下文】
-  - 会话切到 gpt-5.6-terra-1 / gpt-5.6-sol 等模型 → UI 上下文用量条的分母应为 1M
-  - claude / glm-5.3 / deepseek / kimi-k3 / minimax-m3 / gemini-3.x 为官方原生 1M
+  - 会话切到 gpt-5.6-terra-1 / gpt-5.6-sol → UI 上下文用量条分母应为 1M
+  - GLM 渠道任意模型（含 glm-4.7 / glm-5-turbo / glm-5.1 / GLM-4.6V）→ 1M
+  - DeepSeek 渠道任意模型 → 1M
+  - claude / kimi-k3 / minimax-m3 / gemini-3.x 为官方原生 1M
 
 【已知边界】
   - MiniMax-M2.7 系列真实上下文即 200k（官方规格），保持不动
-  - gemini-2.5-pro 由官方 catalog 提供 1M，无需补丁
+  - gemini-2.5-pro 由官方 catalog 提供 1M
   - gpt-6-astra / gpt-5.4 / gpt-5.5 维持官方推断窗口（372k/272k/400k）
+  - GLM/DeepSeek 全模型 1M 依据渠道实际行为（用户确认）；若官方目录后续对齐，
+    可移除 E2 恢复官方表
