@@ -1,23 +1,24 @@
-# 补丁锚点详解（patch-main.cjs 的 9 个改动点）
+# 补丁锚点详解（patch-main.cjs 的 10 个改动点）
 
-每个锚点列出：匹配特征、替换逻辑、0.15.7 验证状态、变化时的应对。对照此文件做侦察（阶段3）和审计（阶段5）。
+每个锚点列出：匹配特征、替换逻辑、0.19.53 验证状态、变化时的应对。对照此文件做侦察（阶段3）和审计（阶段5）。
 
-> **行号说明**：下文行号基于 **0.15.7 patched**（注入补丁后）；orig 对应位置 = patched 行号 − 注入偏移（详见 `version-baseline-0.15.7.md`）。侦察时以 grep 函数名/匹配串为准，行号仅辅助定位。
+> **行号说明**：行号基于各版本基线（见 `version-baseline-*.md`）。侦察时以 grep 函数名/匹配串为准，行号仅辅助定位。
 
 ## A. Pro 数据隔离
 
 ### A1. `.proma-dev` → `.proma-pro`（全替换 3 处）
 - **位置**：`getConfigDirName()` 的 3 个分支（PROMA_DEV 分支、isPackaged 三元、mode 标签判定）。
 - **替换**：全局 `.proma-dev` → `.proma-pro`。
-- **0.15.7**：行 94/98/103，3 处。✅
+- **0.19.53**：3 处，结构未变。✅
 - **应对变化**：grep `.proma-dev` 计数应 >=3。若官方重构了 getConfigDirName，确认 3 处都改到。
 
-### A2. userData setPath 隔离 + electron-pro
-- **匹配**：`setPath("userData", join(appData, "@proma/electron-dev"))` 所在的 `if (!isPackaged)` 块。
-- **替换**：条件加 `|| process.env.PROMA_DEV === "1"`，路径 `electron-dev` → `electron-pro`。
-- **变量名**：`import_electronN` / `import_pathN` 由正则自动探测，无需硬编码。
-- **0.15.7**：行 633944-633945。✅
-- **应对变化**：若 setPath 逻辑重构，确认条件 + 路径都改到；最终 `electron-pro` 全文 1 处、`electron-dev` 0 残留。
+### A2. userData setPath 隔离 + electron-pro（0.19.53 多实例结构）
+- **匹配**（0.19.53 起为 5 行块）：
+  `if (!EL.app.isPackaged) {` + `const instance = process.env.PROMA_DEV_INSTANCE?.replace(...)` + `if (instance) EL.app.setName(...)` + `EL.app.setPath("userData", join(..., instance ? \`@proma/electron-dev-${instance}\` : "@proma/electron-dev"))` + `}`
+- **替换**：条件加 `|| process.env.PROMA_DEV === "1"`，`electron-dev` → `electron-pro`（普通路径与 instance 模板串共 2 处）。
+- **变量名**：`import_electronN` / `import_pathN` 由正则自动探测。
+- **0.19.53**：✅（0.15.7 为单行旧结构，脚本已适配新结构）。
+- **应对变化**：若 setPath 逻辑再重构，确认条件 + 两处路径都改到；最终 `electron-pro` 全文 2 处、`electron-dev` 0 残留。
 
 ## B. 跨渠道子会话
 
@@ -25,85 +26,72 @@
 - **插入点**：`var init_agent_model_selection = __esm({` 前。
 - **新增**：`listEnabledAgentModelsAcrossChannels()`（遍历所有启用渠道的启用模型）+ `resolveChannelForAgentModel(input)`（按 modelId/channelId 反查渠道）。
 - **依赖**：`listChannels()` / `getChannelById()`（bundle 顶层 function 声明，插入点可见——函数提升）。
-- **0.15.7**：插入点行 439347。✅
+- **0.19.53**：插入点在；listChannels（行 36684）/getChannelById（行 36709）仍为顶层声明。✅
 - **应对变化**：若 `init_agent_model_selection` 改名，找等价 __esm 块；确认 listChannels/getChannelById 仍顶层声明（否则改注入位置）。
 
 ### B2. getAvailableAgentModels 改跨渠道
 - **匹配**：整个 `function getAvailableAgentModels(ctx) {...}`（用 listEnabledAgentModelsForChannel 的原版）。
 - **替换**：改用 `listEnabledAgentModelsAcrossChannels()`，返回 models[] 含 channelId/channelName/provider，加 currentChannelId/channelCount。
-- **0.15.7**：行 467956-467973。✅ 函数体与 0.14.23 逐字一致。
+- **0.19.53**：函数体与 0.15.7 逐字一致（once 单处匹配通过）。✅
 - **应对变化**：若参数名 ctx 变，更新匹配串；字段名对齐 channel/model 结构（id/name/source/enabled）。
 
 ### B3a. startDelegation effectiveModelId 解析
-- **匹配**（patch-main.cjs 里是**跨多行**字符串，不是单行）：`const effectiveModelId = args.modelId !== void 0 ? assertEnabledModelForChannel({\n    channelId: ctx.channelId, ...}) : ctx.modelId?.trim()`
+- **匹配**（跨多行）：`const effectiveModelId = args.modelId !== void 0 ? assertEnabledModelForChannel({\n    channelId: ctx.channelId, ...}) : ctx.modelId?.trim()`
 - **替换**：改用 `resolveChannelForAgentModel`，引入 `effectiveChannelId` + `effectiveModelId`。
-- **0.15.7**：行 468013-468020（patched）。✅
-- **侦察提示**：用单行特征串 `effectiveModelId = args.modelId !== void 0` 定位（唯一），再读后续几行确认完整匹配块——别用整段单行 grep（跨行会 0 匹配，误判锚点消失）。
-- **应对变化**：若 purpose 中文文案变，更新匹配串（enc 转义后匹配）。
+- **0.19.53**：结构一致。✅
+- **侦察提示**：用单行特征串 `effectiveModelId = args.modelId !== void 0` 定位（唯一），再读后续几行确认完整匹配块。
 
-### B3b. createAgentSession 调用改 effectiveChannelId
-- **匹配**：`createAgentSession(title, ctx.channelId, ctx.workspaceId, effectiveModelId, parent?.agentRuntime ?? "claude")`。
-- **替换**：`ctx.channelId` → `effectiveChannelId`（保留第5参 agentRuntime）。
-- **0.15.7**：行 468022。⚠️ 0.15.7 vs 0.14.23 多了第5参 `parent?.agentRuntime ?? "claude"`——匹配串已含。
-- **应对变化**：若 createAgentSession 签名再变，更新匹配+替换串（保留新参数，只把 channelId 那个改 effectiveChannelId）。
-
-### B3c. record.channelId
-- **匹配**：record2 对象的 `channelId: ctx.channelId`（childSessionId/modelId 之间）。
+### B3b. createAgentSession 调用改 effectiveChannelId（0.19.53 适配）
+- **匹配**：`const child2 = createAgentSession(title, ctx.channelId, ctx.workspaceId, effectiveModelId);`
 - **替换**：`ctx.channelId` → `effectiveChannelId`。
-- **0.15.7**：行 468039。✅
+- **0.19.53**：✅ 官方 0.19.53 把 0.15.7 的第 5 参 `agentRuntime` 移除（Claude runtime 退役），delegation 调用回到 4 参，局部变量 child → child2。
+- **应对变化**：若 createAgentSession 签名再变（如恢复第 5 参），更新匹配+替换串（只把 channelId 那个参数改 effectiveChannelId，其余参数原样保留）。
+
+### B3c. record2.channelId
+- **匹配**：record2 对象的 `childSessionId: child2.id,\n    channelId: ctx.channelId,\n    modelId: effectiveModelId,`。
+- **替换**：`ctx.channelId` → `effectiveChannelId`。
+- **0.19.53**：✅（child2）
 
 ### B3d. runRegisteredHeadlessAgent input.channelId
-- **匹配**：input 对象的 `channelId: ctx.channelId`（userMessage/modelId 之间，6 空格缩进）。
+- **匹配**：input 对象的 `userMessage: prompt,\n      channelId: ctx.channelId,\n      modelId: effectiveModelId,`（6 空格缩进）。
 - **替换**：`ctx.channelId` → `effectiveChannelId`。
-- **0.15.7**：行 468063。✅ runRegisteredHeadlessAgent 透传 input，channelId 不丢。
+- **0.19.53**：✅（input 顺序未变，后面新增了 workspaceId/startedAt 字段，不影响三行匹配）
 
 ## C. 绿图标
 
 ### C. getTrayIconPath 改 proma-emerald.png
 - **匹配**：`join(resourcesDir, "iconTemplate.png")`。
 - **替换**：`iconTemplate.png` → `proma-emerald.png`。
-- **变量名**：`import_pathN` 由正则自动探测。
-- **0.15.7**：行 631997。✅ resourcesDir 已含 proma-logos 段。
-- **资源确认**：目标母本的 `resources/proma-logos/proma-emerald.png` 必须存在（0.15.7 自带 41KB）。skill 自带 `assets/proma-emerald.png` 源备用——若新版母本缺该 png，从 assets/ 复制过去；要重新生成 green.ico 用 `node scripts/build-ico.cjs assets/proma-emerald.png <out.ico>`。
+- **0.19.53**：✅ import_path9；母本 `resources/proma-logos/proma-emerald.png` 自带。
+- **资源确认**：若新版母本缺该 png，从 assets/ 复制过去。
 
-## D. 跨内核子会话（delegate_agent / delegate_agents 加 agentRuntime，子会话可跑 pi）
+## E. GPT-5.6 家族 1M 上下文（0.19.53 新增）
 
-让协作子会话能选 agentRuntime（claude/pi），突破"子会话强制继承父会话 runtime"。pi runner 在 delegation 路径**已完全可达**（orchestrator.sendMessage 按 sessionMeta.agentRuntime 分发，pi 分支完整实现，automation 已用同链路跑 pi），唯一阻塞是 startDelegation 把 runtime 钉死——改 schema 加字段 + startDelegation 读 args 即通。
+### E1. inferCodexAlignedGPT5ContextWindow 前缀匹配 + 1e6
+- **背景**：官方 switch 只精确匹配 `gpt-5.6-sol/terra/luna`（无尾缀）→ 372k；渠道里的池化变体（gpt-5.6-terra-1、gpt-5.6-sol-az 等）不命中 → 落 DEFAULT 200k。OpenAI 官方规格 1,050,000 token（AWS Bedrock 亦确认 1M）。
+- **匹配**：`const model = modelId?.toLowerCase().replace(/\[1m\]$/i, "");\n  switch (model) {`
+- **替换**：两行之间插入 `if (model !== void 0 && /^gpt-5\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6;`
+- **0.19.53**：✅
+- **优先级链**：`configuredContextWindow（官方渠道后端下发） ?? codexAligned（本补丁） ?? Math.max(catalog, 规则表推断)` —— E1 在 codexAligned 层生效，优先于 catalog 的 272k；后端下发仍最高（官方如果下发更大值不冲突）。
+- **不动的模型**：gpt-5.4/5.5（272k）、gpt-5.4-mini（400k）、gpt-6-astra（372k）维持官方推断；MiniMax-M2.7 真实即 200k；gemini-2.5-pro 官方 catalog 已 1M；glm-5.2/5.3、claude、deepseek、kimi-k3、minimax-m3、qwen、gemini-3.x 官方已原生 1M。
+- **验证期望**：`return 1e6` 注入行 = 1。
 
-### D1 / D2. zod schema 加 agentRuntime（delegate + delegateItem）
-- **匹配**：zod delegate（6空格）+ delegateItem（4空格）的 modelId 行 + 闭合后缀。
-- **替换**：modelId 后加 `agentRuntime: z2.enum(["claude","pi"]).optional().describe(...)`。
-- **坑**：delegate/delegateItem 的 modelId describe 相同，4空格串是6空格的子串 → 用闭合区分（delegateItem `});` vs delegate `},`）。
-- **0.15.7**：delegate 行 468111、delegateItem 行 468101。
+## D. 跨内核子会话（已作废，仅存档）
 
-### D3 / D4. typebox schema 加 agentRuntime（Pi SDK 路径 delegate_agent + delegateItemType）
-- **匹配**：typebox 的 expectedOutput + modelId + 闭合后缀。
-- **替换**：modelId 后加 `agentRuntime: Type2.Optional(Type2.Union([Type2.Literal("claude"), Type2.Literal("pi")], { description: ... }))`。
-- **0.15.7**：delegate_agent 行 468436、delegateItemType 行 468409。
-- **注意**：pi 路径用 typebox（非 zod），必须两套 schema 都改，否则 pi 父会话调 delegate 传不了 agentRuntime。
+0.15.7 曾加 D1-D7（delegate_agent 的 agentRuntime 参数、pi runtime 分支）。**0.19.53 官方已退役 Claude runtime**（migrateRetiredClaudeRuntime 删除 agentRuntime 字段，settings/automation 全部剥离），全部会话统一 Pi runtime，跨内核无补丁意义。若未来官方恢复多 runtime，参考 git 历史找回 D 组匹配串。
 
-### D5. startDelegation createAgentSession 第5参读 args.agentRuntime（跨内核核心）
-- **匹配**：`createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId, parent?.agentRuntime ?? "claude")`。
-- **替换**：第5参 → `args.agentRuntime ?? parent?.agentRuntime ?? "claude"`。
-- **0.15.7**：行 468022。这让 args.agentRuntime 写入子会话 meta，orchestrator 据此走 pi 分支。
+## 部署阶段新增（0.19.53，非 main.cjs 补丁）
 
-### D6. resolveDelegationPermissionMode 第3参读 args.agentRuntime
-- **0.15.7**：行 468011。让 pi 子会话自动 bypassPermissions（resolveDelegationPermissionMode 的 pi 分支强制 bypass，与 automation 一致）。
-
-### D7. runRegisteredHeadlessAgent input 传 agentRuntime（双保险）
-- **0.15.7**：行 468059-069。input 加 agentRuntime，对齐 automation（606516）。即使 sessionMeta 异常也能覆盖。
-
-**D 变化应对**：schema 字段顺序变 → 调匹配串（用 modelId 或 expectedOutput+闭合定位）；startDelegation 重构 → 确认 createAgentSession 第5参仍是 agentRuntime；新增绕过 startDelegation 的子会话路径 → 加新补丁点。
-
-**D 验证期望**：`z2.enum(["claude","pi"])` = 2、`Type2.Literal("claude")` = 2、`args.agentRuntime ?? parent?.agentRuntime` = 3。
+- **icon.ico 补齐**：0.19.53 运行时会找 `<resources>/app/dist/resources/icon.ico`（getIconPath，__dirname 相对）与 `<resources>/icon.ico`（主窗口），母本均无（官方 asar 版同样缺失，无害告警）。部署时复制 green.ico 到两个位置，消除告警并统一绿图标。
+- **禁用自动更新**：`resources/app-update.yml` 的 `url` 改为 `https://127.0.0.1/proma-pro-auto-update-disabled/`。否则更新器空闲时自动安装官方新版，整个 patch 会被覆盖。验证：启动 log 出现 `[更新-updater] Error: net::ERR_CONNECTION_REFUSED`。
 
 ## 副作用检查清单（审计阶段）
 
-- [ ] diff orig vs patched，改动集合恰好 9 锚点（无多余无遗漏）。
+- [ ] diff orig vs patched，改动集合恰好 10 锚点（无多余无遗漏）。
 - [ ] `effectiveChannelId` 全文计数 = 1 定义 + 3 使用（B3b/c/d）= 4。
-- [ ] `createAgentSession` 其他调用点（fork/automation/普通创建/UI actions 等约 10 处）**保持原语义**——只 startDelegation 这处跨渠道。
+- [ ] `createAgentSession` 其他调用点（`createAgentSession(title, channelId` 形式约 3 处 + 无 title 形式若干）**保持原语义**——只 startDelegation 这处跨渠道。
 - [ ] `getAvailableAgentModels` 被注册为 MCP 工具 `list_available_agent_models`（renderer/agent 可达）。
-- [ ] `startDelegation` 是唯一 delegation 入口（delegate_agent/delegate_agents 的调用点都在其 handler 内）。
 - [ ] 注入函数无重名（listEnabledAgentModelsAcrossChannels / resolveChannelForAgentModel 各 1 处定义）。
 - [ ] `\uXXXX` 转义无损（node --check 通过，注入中文抽样解码正确）。
 - [ ] 原有 `assertEnabledModelForChannel` 仍被其他流程调用（未破坏）；`listEnabledAgentModelsForChannel` 沦为死代码（无害）。
+- [ ] E1 正则只匹配 gpt-5.6 家族（不误伤 gpt-5.4/5.5/gpt-6-astra）。
