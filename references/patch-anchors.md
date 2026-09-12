@@ -1,6 +1,6 @@
-# 补丁锚点详解（patch-main.cjs 的 10 个改动点）
+# 补丁锚点详解（patch-main.cjs 的 12 个改动点）
 
-每个锚点列出：匹配特征、替换逻辑、0.19.53 验证状态、变化时的应对。对照此文件做侦察（阶段3）和审计（阶段5）。
+每个锚点列出：匹配特征、替换逻辑、0.19.53 验证状态、变化时的应对。对照此文件做侦察（阶段3）和审计（阶段5）。E 组共 3 个改动点（E1 + E2a + E2b）。
 
 > **行号说明**：行号基于各版本基线（见 `version-baseline-*.md`）。侦察时以 grep 函数名/匹配串为准，行号仅辅助定位。
 
@@ -65,7 +65,7 @@
 - **0.19.53**：✅ import_path9；母本 `resources/proma-logos/proma-emerald.png` 自带。
 - **资源确认**：若新版母本缺该 png，从 assets/ 复制过去。
 
-## E. GPT-5.6 家族 1M 上下文（0.19.53 新增）
+## E. 上下文窗口补丁（0.19.53：E1 GPT-5.6；E2 GLM/DeepSeek 全模型）
 
 ### E1. inferCodexAlignedGPT5ContextWindow 前缀匹配 + 1e6
 - **背景**：官方 switch 只精确匹配 `gpt-5.6-sol/terra/luna`（无尾缀）→ 372k；渠道里的池化变体（gpt-5.6-terra-1、gpt-5.6-sol-az 等）不命中 → 落 DEFAULT 200k。OpenAI 官方规格 1,050,000 token（AWS Bedrock 亦确认 1M）。
@@ -75,6 +75,16 @@
 - **优先级链**：`configuredContextWindow（官方渠道后端下发） ?? codexAligned（本补丁） ?? Math.max(catalog, 规则表推断)` —— E1 在 codexAligned 层生效，优先于 catalog 的 272k；后端下发仍最高（官方如果下发更大值不冲突）。
 - **不动的模型**：gpt-5.4/5.5（272k）、gpt-5.4-mini（400k）、gpt-6-astra（372k）维持官方推断；MiniMax-M2.7 真实即 200k；gemini-2.5-pro 官方 catalog 已 1M；glm-5.2/5.3、claude、deepseek、kimi-k3、minimax-m3、qwen、gemini-3.x 官方已原生 1M。
 - **验证期望**：`return 1e6` 注入行 = 1。
+
+### E2. GLM / DeepSeek 渠道全模型 1M（E2a + E2b）
+- **背景**：官方规则表 `ONE_MILLION_CONTEXT_RULES` 只列 glm-5.2/5.3 系与 deepseek-v4/flash；用户渠道（智谱编码套餐 / DeepSeek 开放平台）实际全模型开放 1M（渠道方行为，公开文档未逐一标注；glm-4.7/5-turbo/5.1/4.6v 的 catalog 还是 204800/200000/128000）。
+- **匹配**（两个独立 once，纯 ASCII 代码行）：
+  - E2a：`      deepseek: ["deepseek-v4", "deepseek-flash"],` → `      deepseek: ["deepseek-"],`
+  - E2b：`      glm: ["glm-5.3", "glm-5.3-flash", "glm-5.2"],` → `      glm: ["glm-"],`
+- **匹配串避开中文注释行的原因**：esbuild bundle 里**注释是明文中文、字符串字面量才是 \uXXXX**；once() 的 enc() 会把注释汉字转义导致失配。只匹配纯 ASCII 代码行则无此问题。
+- **生效链**：`supports1MContext` 先 toLowerCase 再 `model.includes(pattern)` —— "glm-"/"deepseek-" 前缀覆盖全系列（含 glm-4.6v、deepseek-v4.1-* 变体与未来新型号）；最终窗口 = `Math.max(catalog, 1e6)` = 1M。`deepgeminipro` 等不含前缀的 ID 不受影响。
+- **0.19.53**：✅
+- **验证期望**：`deepseek: ["deepseek-"]` = 1、`glm: ["glm-"]` = 1。
 
 ## D. 跨内核子会话（已作废，仅存档）
 
@@ -94,4 +104,4 @@
 - [ ] 注入函数无重名（listEnabledAgentModelsAcrossChannels / resolveChannelForAgentModel 各 1 处定义）。
 - [ ] `\uXXXX` 转义无损（node --check 通过，注入中文抽样解码正确）。
 - [ ] 原有 `assertEnabledModelForChannel` 仍被其他流程调用（未破坏）；`listEnabledAgentModelsForChannel` 沦为死代码（无害）。
-- [ ] E1 正则只匹配 gpt-5.6 家族（不误伤 gpt-5.4/5.5/gpt-6-astra）。
+- [ ] E1 正则只匹配 gpt-5.6 家族（不误伤 gpt-5.4/5.5/gpt-6-astra）；E2 前缀只命中 glm-*/deepseek-* 系（deepgeminipro 等不含前缀的 ID 不受影响）。
