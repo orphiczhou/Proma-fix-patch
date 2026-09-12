@@ -1,6 +1,6 @@
 // patch-main.cjs —— 把 Proma 官方 main.cjs 改造成 Pro 版（跨渠道子会话 + Pro 数据隔离 + 绿图标 + GPT-5.6 1M 上下文）
 // 版本无关设计：正则自动探测 esbuild 变量名（import_electronN / import_pathN），不硬编码版本号。
-// 8 个锚点基于 0.15.7 / 0.19.53 验证过的结构。
+// 8 组锚点（12 个改动点）基于 0.15.7 / 0.19.53 验证过的结构。
 // 若某锚点匹配失败（throw "期望1处匹配，实际0处"），说明新版结构变化 —— 先跑 SKILL.md 的"侦察"阶段，
 // 对照 references/patch-anchors.md 适配本脚本（通常是匹配串里的函数签名变了）。
 //
@@ -9,7 +9,8 @@
 //     agentRuntime 已成 legacy 字段（migrateRetiredClaudeRuntime 主动删除），无补丁意义。
 //   - B3b/B3c 适配：createAgentSession 回到 4 参（agentRuntime 第5参被移除），局部变量 child → child2。
 //   - A2 适配：setPath userData 块新增 PROMA_DEV_INSTANCE 多实例支持（setName + 模板串），electron-pro 同步替换两处。
-//   - E 组新增：GPT-5.6 家族（含 -1/-2/-az 等池化尾缀变体）contextWindow 提到 1M（OpenAI 官方规格 1,050,000）。
+//   - E 组新增：GPT-5.6 家族（含 -1/-2/-az 等池化尾缀变体）contextWindow 提到 1M（OpenAI 官方规格 1,050,000）；
+//     GLM / DeepSeek 渠道全模型 1M（用户渠道实际开放，规则表改前缀匹配）。
 //
 // 关键约束：① 不全局解码文件（破坏正则字面量 \t/\n）；② 中文按需 enc 成 \uXXXX 匹配；③ ?? 与 || 不混用。
 // 用法: node patch-main.cjs <main.cjs路径>
@@ -205,6 +206,21 @@ once('E1 gpt-5.6家族 1M 上下文',
   switch (model) {`
 )
 
+// ===== E2. GLM / DeepSeek 渠道全模型 1M 上下文 =====
+// 背景：官方规则表只列 glm-5.2/5.3 系与 deepseek-v4/flash；用户渠道（智谱编码套餐 / DeepSeek）
+// 实际全模型开放 1M（渠道方行为，公开文档未逐一标注）。改为 "glm-" / "deepseek-" 前缀
+// includes 匹配，覆盖全系列与未来新型号；catalog 200k/128k 与规则表取 max，最终 1M。
+// 注意：匹配串避开中文注释行——bundle 里注释是明文、字符串字面量才是 \uXXXX，enc() 会把
+// 注释汉字转义导致失配；故只匹配纯 ASCII 代码行。
+once('E2a DeepSeek 全模型 1M',
+  `      deepseek: ["deepseek-v4", "deepseek-flash"],`,
+  `      deepseek: ["deepseek-"],`
+)
+once('E2b GLM 全模型 1M',
+  `      glm: ["glm-5.3", "glm-5.3-flash", "glm-5.2"],`,
+  `      glm: ["glm-"],`
+)
+
 // ===== 验证（符号均为 ASCII，在 \uXXXX 中文环境下可正确计数）=====
 function assertCount(label, sym, min) {
   const c = src.split(sym).length - 1
@@ -216,6 +232,8 @@ assertCount('effectiveChannelId', 'effectiveChannelId', 3)
 assertCount('.proma-pro', '.proma-pro', 3)
 assertCount('electron-pro', 'electron-pro', 2)
 assertCount('E: gpt-5.6 1M rule', '/^gpt-5\\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6', 1)
+assertCount('E2: deepseek 全模型 1M', 'deepseek: ["deepseek-"]', 1)
+assertCount('E2: glm 全模型 1M', 'glm: ["glm-"]', 1)
 assertCount('proma-emerald.png', 'proma-emerald.png', 1)
 if (src.includes('.proma-dev')) throw new Error('[验证失败] 仍残留 .proma-dev')
 if (src.includes('electron-dev')) throw new Error('[验证失败] 仍残留 electron-dev')
