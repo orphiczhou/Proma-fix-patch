@@ -2,21 +2,25 @@ Proma-Pro 便携部署包（Windows x64，基于 Proma {{VERSION}}）
 =====================================================
 
 【这是什么】
-基于 Proma {{VERSION}} 的定制版，含三项改动：
+基于 Proma {{VERSION}} 的定制版，含四项改动：
   1. 协作子会话跨渠道选模型 —— 开子会话时可用任意已启用渠道的模型
      （delegate_agent / delegate_agents 传其他渠道的 modelId，子会话自动挂到该渠道运行）
-  2. 绿色图标（托盘 proma-emerald + exe 图标）
-  3. 独立数据目录 ~/.proma-pro，可与原版 Proma 同时运行、互不影响
+  2. GPT-5.6 家族 1M 上下文 —— gpt-5.6-sol/terra/luna 及其池化变体
+     （gpt-5.6-terra-1、gpt-5.6-sol-az 等）contextWindow 从 200k/372k 提到 1M
+     （OpenAI 官方规格 1,050,000 token；glm-5.2/5.3、claude、deepseek、kimi-k3、
+      minimax-m3、gemini 等官方 0.19.53 已原生支持 1M，无需补丁）
+  3. 绿色图标（托盘 proma-emerald + exe 图标）
+  4. 独立数据目录 ~/.proma-pro，可与原版 Proma 同时运行、互不影响
 
 【部署步骤】
-  1. 把整个目录拷到目标机器任意路径（如 D:\PromaPro\）
+  1. 把整个目录拷到目标机器任意路径（如 D:\Proma-Pro\）
   2. 双击 start-pro.bat 启动
   3. 首次启动后，在 UI 里【重新配置渠道（API key）、重新登录】
      —— 本机的 API key / OAuth 是加密绑定机器的，不能跨机器直接复制
 
 【运行要求】
   - Windows x64（原生模块 skia.win32-x64-msvc 绑定，Mac/Linux/ARM 不行）
-  - 首次启动若 SmartScreen 拦截，选“更多信息 → 仍要运行”
+  - 首次启动若 SmartScreen 拦截，选"更多信息 → 仍要运行"
     （exe 改过图标，数字签名失效，本地运行无影响）
 
 【关键说明】
@@ -24,8 +28,18 @@ Proma-Pro 便携部署包（Windows x64，基于 Proma {{VERSION}}）
   - 业务数据在 ~/.proma-pro，electron 登录态在 %APPDATA%\@proma\electron-pro
     —— 与原版 Proma（~/.proma、@proma\electron）完全隔离，可共存
   - 不要把本机的 ~/.proma-pro\channels.json 直接拷给目标机器（DPAPI 加密会解密失败）
+  - 同机升级：~/.proma-pro 数据目录与旧版兼容，直接换目录启动即可继承全部会话/渠道
 
 【验证跨渠道子会话】
   启动后在 Agent 会话里：
   - 调用 list_available_agent_models → 应看到所有渠道的模型（每个带 channelId）
   - delegate_agent(task=..., modelId=<其他渠道的模型id>) → 子会话会跑在该渠道上
+
+【验证 1M 上下文】
+  - 会话切到 gpt-5.6-terra-1 / gpt-5.6-sol 等模型 → UI 上下文用量条的分母应为 1M
+  - claude / glm-5.3 / deepseek / kimi-k3 / minimax-m3 / gemini-3.x 为官方原生 1M
+
+【已知边界】
+  - MiniMax-M2.7 系列真实上下文即 200k（官方规格），保持不动
+  - gemini-2.5-pro 由官方 catalog 提供 1M，无需补丁
+  - gpt-6-astra / gpt-5.4 / gpt-5.5 维持官方推断窗口（372k/272k/400k）
