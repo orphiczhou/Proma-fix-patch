@@ -1,8 +1,16 @@
-// patch-main.cjs —— 把 Proma 官方 main.cjs 改造成 Pro 版（跨渠道子会话 + Pro 数据隔离 + 绿图标）
+// patch-main.cjs —— 把 Proma 官方 main.cjs 改造成 Pro 版（跨渠道子会话 + Pro 数据隔离 + 绿图标 + GPT-5.6 1M 上下文）
 // 版本无关设计：正则自动探测 esbuild 变量名（import_electronN / import_pathN），不硬编码版本号。
-// 9 个锚点基于 0.14.23 / 0.15.7 验证过的结构。若某锚点匹配失败
-//   （throw "期望1处匹配，实际0处"），说明新版结构变化 —— 先跑 SKILL.md 的"侦察"阶段，
-//   对照 references/patch-anchors.md 适配本脚本（通常是匹配串里的函数签名变了）。
+// 8 个锚点基于 0.15.7 / 0.19.53 验证过的结构。
+// 若某锚点匹配失败（throw "期望1处匹配，实际0处"），说明新版结构变化 —— 先跑 SKILL.md 的"侦察"阶段，
+// 对照 references/patch-anchors.md 适配本脚本（通常是匹配串里的函数签名变了）。
+//
+// 0.19.53 适配记录（相对 0.15.7 版脚本）：
+//   - D 组（跨内核 agentRuntime）整体移除：0.19.53 官方已退役 Claude runtime，全部会话统一 Pi runtime，
+//     agentRuntime 已成 legacy 字段（migrateRetiredClaudeRuntime 主动删除），无补丁意义。
+//   - B3b/B3c 适配：createAgentSession 回到 4 参（agentRuntime 第5参被移除），局部变量 child → child2。
+//   - A2 适配：setPath userData 块新增 PROMA_DEV_INSTANCE 多实例支持（setName + 模板串），electron-pro 同步替换两处。
+//   - E 组新增：GPT-5.6 家族（含 -1/-2/-az 等池化尾缀变体）contextWindow 提到 1M（OpenAI 官方规格 1,050,000）。
+//
 // 关键约束：① 不全局解码文件（破坏正则字面量 \t/\n）；② 中文按需 enc 成 \uXXXX 匹配；③ ?? 与 || 不混用。
 // 用法: node patch-main.cjs <main.cjs路径>
 const fs = require('fs')
@@ -13,17 +21,18 @@ let src = fs.readFileSync(file, 'utf8')
 const enc = (s) => s.replace(/[^\x00-\x7F]/g, (ch) => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase())
 
 // ===== 自动探测 esbuild 变量名（setPath 行 + trayIcon 行）=====
-// setPath 形如：import_electron49.app.setPath("userData", (0, import_path11.join)(import_electron49.app.getPath("appData"), "@proma/electron-dev"))
-const setPathRe = /(\bimport_electron\d+)\.app\.setPath\("userData", \(0, (\bimport_path\d+)\.join\)\(\1\.app\.getPath\("appData"\), "@proma\/electron-dev"\)/
+// 0.19.53 setPath 形如：
+//   import_electronN.app.setPath("userData", (0, import_pathM.join)(import_electronN.app.getPath("appData"), instance ? `@proma/electron-dev-${instance}` : "@proma/electron-dev"));
+const setPathRe = /(\bimport_electron\d+)\.app\.setPath\("userData", \(0, (\bimport_path\d+)\.join\)\(\1\.app\.getPath\("appData"\), instance/
 const setPathMatch = src.match(setPathRe)
-if (!setPathMatch) throw new Error('[探测失败] 未找到 setPath(userData, electron-dev) 行，0.15.7 结构可能已变 —— 请人工核查')
-const EL = setPathMatch[1] // import_electron49
-const PA = setPathMatch[2] // import_path11
-// trayIcon 形如：(0, import_path10.join)(resourcesDir, "iconTemplate.png")
+if (!setPathMatch) throw new Error('[探测失败] 未找到 setPath(userData, electron-dev) 行，结构可能已变 —— 请人工核查')
+const EL = setPathMatch[1] // import_electron59
+const PA = setPathMatch[2] // import_path10
+// trayIcon 形如：(0, import_pathK.join)(resourcesDir, "iconTemplate.png")
 const trayRe = /\(0, (\bimport_path\d+)\.join\)\(resourcesDir, "iconTemplate\.png"\)/
 const trayMatch = src.match(trayRe)
 if (!trayMatch) throw new Error('[探测失败] 未找到 getTrayIconPath 的 iconTemplate.png 行，结构可能已变 —— 请人工核查')
-const PT = trayMatch[1] // import_path10
+const PT = trayMatch[1] // import_path9
 console.log(`[探测] setPath: ${EL} / ${PA}；trayIcon: ${PT}`)
 
 const done = []
@@ -44,9 +53,17 @@ function all(label, oldS, newS) {
 
 // ===== A. Pro 数据隔离 =====
 all('A1 .proma-dev->.proma-pro', '.proma-dev', '.proma-pro')
-once('A2 userData隔离+electron-pro',
-  `    if (!${EL}.app.isPackaged) {\n      ${EL}.app.setPath("userData", (0, ${PA}.join)(${EL}.app.getPath("appData"), "@proma/electron-dev"));\n    }`,
-  `    if (!${EL}.app.isPackaged || process.env.PROMA_DEV === "1") {\n      ${EL}.app.setPath("userData", (0, ${PA}.join)(${EL}.app.getPath("appData"), "@proma/electron-pro"));\n    }`
+once('A2 userData隔离+electron-pro（0.19.53 多实例结构）',
+  `    if (!${EL}.app.isPackaged) {
+      const instance = process.env.PROMA_DEV_INSTANCE?.replace(/[^a-zA-Z0-9_-]/g, "");
+      if (instance) ${EL}.app.setName(\`Proma-\${instance}\`);
+      ${EL}.app.setPath("userData", (0, ${PA}.join)(${EL}.app.getPath("appData"), instance ? \`@proma/electron-dev-\${instance}\` : "@proma/electron-dev"));
+    }`,
+  `    if (!${EL}.app.isPackaged || process.env.PROMA_DEV === "1") {
+      const instance = process.env.PROMA_DEV_INSTANCE?.replace(/[^a-zA-Z0-9_-]/g, "");
+      if (instance) ${EL}.app.setName(\`Proma-\${instance}\`);
+      ${EL}.app.setPath("userData", (0, ${PA}.join)(${EL}.app.getPath("appData"), instance ? \`@proma/electron-pro-\${instance}\` : "@proma/electron-pro"));
+    }`
 )
 
 // ===== B. 跨渠道子会话 =====
@@ -147,16 +164,16 @@ once('B3a effectiveModelId解析',
   const effectiveChannelId = resolved.channelId || ctx.channelId;
   const effectiveModelId = resolved.modelId || ctx.modelId?.trim() || void 0;`
 )
-// 0.15.7 适配：createAgentSession 调用多了第5参数 parent?.agentRuntime ?? "claude"，显式纳入匹配串
-once('B3b createAgentSession(含第5参agentRuntime)',
-  `  const child = createAgentSession(title, ctx.channelId, ctx.workspaceId, effectiveModelId, parent?.agentRuntime ?? "claude");`,
-  `  const child = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId, parent?.agentRuntime ?? "claude");`
+// 0.19.53 适配：createAgentSession 回到 4 参（0.15.7 的第5参 agentRuntime 已随 Claude runtime 退役移除），局部变量 child -> child2
+once('B3b createAgentSession改effectiveChannelId',
+  `  const child2 = createAgentSession(title, ctx.channelId, ctx.workspaceId, effectiveModelId);`,
+  `  const child2 = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId);`
 )
 once('B3c record.channelId',
-  `    childSessionId: child.id,
+  `    childSessionId: child2.id,
     channelId: ctx.channelId,
     modelId: effectiveModelId,`,
-  `    childSessionId: child.id,
+  `    childSessionId: child2.id,
     channelId: effectiveChannelId,
     modelId: effectiveModelId,`
 )
@@ -169,60 +186,23 @@ once('B3d runHeadless channelId',
       modelId: effectiveModelId,`
 )
 
-// ===== C. 托盘图标改绿（0.15.7 resources/proma-logos/ 已含 proma-emerald.png）=====
+// ===== C. 托盘图标改绿（resources/proma-logos/proma-emerald.png 需存在于母本）=====
 once('C tray icon -> emerald',
   `(0, ${PT}.join)(resourcesDir, "iconTemplate.png")`,
   `(0, ${PT}.join)(resourcesDir, "proma-emerald.png")`
 )
 
-// ===== D. 跨内核子会话：delegate_agent/delegate_agents 加 agentRuntime，子会话可跑 pi =====
-// pi runner 在 delegation 路径完全可达（orchestrator.sendMessage 按 sessionMeta.agentRuntime 分发，
-// pi 分支已完整实现，automation 已用同链路跑 pi）。原阻塞：startDelegation 钉死子会话 runtime 为
-// parent?.agentRuntime ?? "claude"。改 schema 加 agentRuntime 字段 + startDelegation 读 args.agentRuntime 即通。
-once('D1 zod delegate +agentRuntime',
-  `      modelId: nonBlankString.optional().describe("可选目标模型 ID；必须属于父会话当前渠道且已启用。不传则继承父会话当前模型")`,
-  `      modelId: nonBlankString.optional().describe("可选目标模型 ID；必须属于父会话当前渠道且已启用。不传则继承父会话当前模型"),
-      agentRuntime: z2.enum(["claude","pi"]).optional().describe("子会话 Agent runtime；不传继承父会话。pi 适合 OpenAI Responses 等非 Anthropic 协议模型")`
-)
-once('D2 zod delegateItem +agentRuntime',
-  `    modelId: nonBlankString.optional().describe("可选目标模型 ID；必须属于父会话当前渠道且已启用。不传则继承父会话当前模型")
-  });`,
-  `    modelId: nonBlankString.optional().describe("可选目标模型 ID；必须属于父会话当前渠道且已启用。不传则继承父会话当前模型"),
-    agentRuntime: z2.enum(["claude","pi"]).optional().describe("子会话 Agent runtime；不传继承父会话。pi 适合 OpenAI Responses 等非 Anthropic 协议模型")
-  });`
-)
-once('D3 typebox delegate_agent +agentRuntime',
-  `        expectedOutput: Type2.Optional(Type2.String({ description: "希望子 Agent 最终返回的格式或要点" })),
-        modelId: Type2.Optional(Type2.String({ description: "可选目标模型 ID" }))`,
-  `        expectedOutput: Type2.Optional(Type2.String({ description: "希望子 Agent 最终返回的格式或要点" })),
-        modelId: Type2.Optional(Type2.String({ description: "可选目标模型 ID" })),
-        agentRuntime: Type2.Optional(Type2.Union([Type2.Literal("claude"), Type2.Literal("pi")], { description: "子会话 Agent runtime；不传继承父会话" }))`
-)
-once('D4 typebox delegateItemType +agentRuntime',
-  `    expectedOutput: Type2.Optional(Type2.String({ description: "希望子 Agent 最终返回的格式或要点" })),
-    modelId: Type2.Optional(Type2.String({ description: "可选目标模型 ID" }))
-  });`,
-  `    expectedOutput: Type2.Optional(Type2.String({ description: "希望子 Agent 最终返回的格式或要点" })),
-    modelId: Type2.Optional(Type2.String({ description: "可选目标模型 ID" })),
-    agentRuntime: Type2.Optional(Type2.Union([Type2.Literal("claude"), Type2.Literal("pi")], { description: "子会话 Agent runtime；不传继承父会话" }))
-  });`
-)
-once('D5 createAgentSession 读 args.agentRuntime',
-  `  const child = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId, parent?.agentRuntime ?? "claude");`,
-  `  const child = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId, args.agentRuntime ?? parent?.agentRuntime ?? "claude");`
-)
-once('D6 permissionMode 第3参读 args.agentRuntime',
-  `    ctx.agentRuntime ?? parent?.agentRuntime
-  );`,
-  `    args.agentRuntime ?? parent?.agentRuntime ?? ctx.agentRuntime
-  );`
-)
-once('D7 headless input 传 agentRuntime（双保险）',
-  `      permissionModeOverride: permissionMode,
-      triggeredBy: "delegation",`,
-  `      agentRuntime: args.agentRuntime ?? parent?.agentRuntime ?? "claude",
-      permissionModeOverride: permissionMode,
-      triggeredBy: "delegation",`
+// ===== E. GPT-5.6 家族 1M 上下文 =====
+// 背景：0.19.53 的 inferCodexAlignedGPT5ContextWindow 只对无尾缀的 "gpt-5.6-sol/terra/luna" 精确匹配，
+// 渠道里的池化变体（gpt-5.6-terra-1、gpt-5.6-sol-az 等）不命中 → 落 DEFAULT_CONTEXT_WINDOW=200k；
+// 无尾缀版也只给 CODEX 对齐值 372k。OpenAI 官方模型规格为 1,050,000 token（AWS Bedrock 亦确认 1M），
+// 故 gpt-5.6 全系（含尾缀变体）统一提到 1e6。gpt-5.4/5.5/5.4-mini 与 gpt-6-astra 维持官方推断值不动。
+once('E1 gpt-5.6家族 1M 上下文',
+  `  const model = modelId?.toLowerCase().replace(/\\[1m\\]$/i, "");
+  switch (model) {`,
+  `  const model = modelId?.toLowerCase().replace(/\\[1m\\]$/i, "");
+  if (model !== void 0 && /^gpt-5\\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6;
+  switch (model) {`
 )
 
 // ===== 验证（符号均为 ASCII，在 \uXXXX 中文环境下可正确计数）=====
@@ -234,10 +214,8 @@ assertCount('listEnabledAgentModelsAcrossChannels', 'listEnabledAgentModelsAcros
 assertCount('resolveChannelForAgentModel', 'resolveChannelForAgentModel', 2)
 assertCount('effectiveChannelId', 'effectiveChannelId', 3)
 assertCount('.proma-pro', '.proma-pro', 3)
-assertCount('electron-pro', 'electron-pro', 1)
-assertCount('D: zod agentRuntime enum', 'z2.enum(["claude","pi"])', 2)
-assertCount('D: typebox agentRuntime union', 'Type2.Literal("claude"), Type2.Literal("pi")', 2)
-assertCount('D: args.agentRuntime in delegation', 'args.agentRuntime ?? parent?.agentRuntime', 3)
+assertCount('electron-pro', 'electron-pro', 2)
+assertCount('E: gpt-5.6 1M rule', '/^gpt-5\\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6', 1)
 assertCount('proma-emerald.png', 'proma-emerald.png', 1)
 if (src.includes('.proma-dev')) throw new Error('[验证失败] 仍残留 .proma-dev')
 if (src.includes('electron-dev')) throw new Error('[验证失败] 仍残留 electron-dev')
