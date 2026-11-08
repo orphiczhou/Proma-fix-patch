@@ -62,3 +62,42 @@
 ## 14. GitHub 直连超时（国内网络）
 **现象**：git clone / codeload zip 大文件超时，api.github.com 却可达。
 **正解**：小文件走 `raw.githubusercontent.com` 逐个下载（<100KB 稳定）；大文件（icon、skill 分发包）从本机旧部署复制或 npm 重建；仓库更新若 push 超时，改用 GitHub Contents API 逐文件 PUT。
+
+## 15. 官方改一句文案就让整函数匹配失效（0.21.92 实踩）
+
+**现象**：0.19.53 用「整个 `function getAvailableAgentModels(ctx) {...}` 逐字匹配」的 B2，在 0.21.92 上 0 命中——官方只改了函数里的 `note` 文案和工具描述，结构完全没变。
+**正解**：这类"整函数替换"锚点改用**区间替换**（起点函数声明 + 终点下一个函数声明），只依赖函数边界不依赖内部文案。patch-main.cjs 里 `range()` 就是干这个的；起点/终点必须各自唯一。
+**延伸**：同理，`list_available_agent_models` 的工具描述是中文 `\uXXXX` 字符串，改它属于可选增强（B2b）；不改也不影响功能，只影响模型能否发现跨渠道能力。
+
+## 16. 官方停用渠道会整块作废补丁（0.21.92：opencode-go）
+
+**现象**：0.19.53 花大力气做的"GLM-5.3 在 OpenCode Go 上 400 修复"（endpoint-aware zai 字段），在 0.21.92 里毫无意义——官方 `buildModel` 直接 `throw "OpenCode Go 渠道已停用"`，compat 分支全删。
+**正解**：重打前先 `grep -n "opencode\|<受影响 provider>" main-orig.cjs`，确认 provider 还在、相关函数还在，再决定是否重打；停用/重构的补丁组直接归档进 patch-anchors 的"已作废"区，不要硬打。
+**教训**：补丁是对官方实现细节的寄生，官方删功能比改结构更彻底。
+
+## 17. rcedit v5 不能用绝对路径 require（0.21.92 实踩）
+
+**现象**：`require('C:/Users/<user>/AppData/Roaming/npm/node_modules/rcedit')` 报 MODULE_NOT_FOUND，但目录确实存在。
+**根因**：rcedit v5 的 package.json 只有 `exports`、没有 `main`；按目录绝对路径 require 不解析 exports。
+**正解**：二选一——① 在项目里 `npm i rcedit` 后按包名 require；② `module.paths.push(<全局 node_modules 绝对路径>)` 再 `require('rcedit')`（走 exports 解析）。仓库脚本 `set-exe-icon.cjs` 用的是后者（指向 `assets/node_modules`）。
+**验证**：改完用 PowerShell `Get-Item <exe> | % VersionInfo` 看版本号，再 `[System.Drawing.Icon]::ExtractAssociatedIcon(<exe>)` 存 PNG 肉眼确认颜色。
+
+## 18. 母本可直接复制运行中的安装目录（0.21.92 新路线）
+
+**现象**：不想每次找 7za 解 setup.exe，尤其更新器缓存只剩 `installer.exe` 时。
+**做法**：`MSYS_NO_PATHCONV=1 robocopy "D:\Proma" "D:\Proma-Pro-<版本>" /E /R:1 /W:1`。运行中的 Electron 安装目录可读复制（exe/asar/原生模块都能复制），0.21.92 实测 736 文件 0 失败、2 秒完成。
+**注意**：① git bash 里 `/E` 会被路径转换吃掉，必须加 `MSYS_NO_PATHCONV=1`；② robocopy 退出码 0-7 都算成功；③ 复制后先 `node read-asar.cjs <asar> package.json` 确认版本，别把旧版当母本；④ 用户数据（`~/.proma`）不在安装目录，不会被复制。
+**何时仍用 7za**：需要干净的官方安装树（含卸载器/许可文件）或本机没有已装同版本时。
+
+## 19. 渲染层验证：CDP 比截图可靠（0.21.92 实践）
+
+**做法**：用 `PROMA_DEV=1` + `--remote-debugging-port=<port>` 起 Pro，`curl http://127.0.0.1:<port>/json/list` 拿 `webSocketDebuggerUrl`，Node 内置 `WebSocket` 直接 `Runtime.evaluate`。
+**能干什么**：读 `document.body.innerText` 确认版本/会话/模型标签；`window.electronAPI` 有 429 个 IPC 方法（`listChannels` / `listAgentSessions` / `deleteAgentSession` 等），可用来清理测试数据；`Input.insertText` + `Input.dispatchKeyEvent` 能把消息真正发进会话，端到端验证 `delegate_agent` 跨渠道。
+**安全**：验证完必须关掉带调试端口的实例再正常重启（否则局域网内可被 CDP 控制）；测试会话用 `deleteAgentSession` 删掉，别污染用户历史。
+**注意**：主进程补丁函数不在渲染层作用域，CDP 只能验证"行为/界面/数据落盘"，不能直接调用 `resolveChannelForAgentModel`。
+
+## 20. asar 头偏移（自己写解析时）
+
+**格式**：`[0,4)` pickle 长度=4、`[4,8)` headerSize、`[8,12)` payload、`[12,16)` JSON 字符串长度、`[16, 16+len)` header JSON；数据区 base = `8 + headerSize`。
+**坑**：从 `[8, ...)` 开始解析或把 `[12,16)` 当 headerSize 都会得到 `{r2 {` 之类的乱码，报 "Unexpected token"。
+**正解**：直接用仓库的 `read-asar.cjs` / `extract-asar.cjs`，别手写。
