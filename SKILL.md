@@ -93,6 +93,8 @@ cp "$WORK/main-orig.cjs" "$WORK/main-patched.cjs"
 "$NODE" -e "const s=require('fs').readFileSync(process.argv[1],'utf8');const c=x=>s.split(x).length-1;console.log({across:c('listEnabledAgentModelsAcrossChannels'),resolve:c('resolveChannelForAgentModel'),eff:c('effectiveChannelId'),promapro:c('.proma-pro'),promadev:c('.proma-dev'),elepro:c('electron-pro'),eledev:c('electron-dev'),emerald:c('proma-emerald.png'),e2a:c('deepseek: [\"deepseek-\"]'),e2b:c('glm: [\"glm-\"]'),e1:c('/^gpt-5\\\\.6(?:-[a-z0-9]+)*$/.test(model)) return 1e6')});" "$WORK/main-patched.cjs"
 # diff 审计：hunks 数应与锚点组数一致（0.21.92 = 10 hunks）
 diff -u "$WORK/main-orig.cjs" "$WORK/main-patched.cjs" > "$WORK/patch.diff"; grep -c '^@@' "$WORK/patch.diff"
+# 上下文窗口行为断言（从 patched main.cjs 抽函数跑 16 条用例；orig 应有 6 条 FAIL 作对照）
+"$NODE" "$SKILL/scripts/verify-context-window.cjs" "$WORK/main-patched.cjs"
 ```
 
 对抗性检查（清单见 `references/patch-anchors.md`）：diff 确认改动恰好预期锚点；`createAgentSession` 其他调用点不应被改；注入函数作用域内 `listChannels`/`getChannelById`/`getEnabledAgentModelSource` 可见。
@@ -173,6 +175,7 @@ sed 's/{{VERSION}}/<版本>/g' "$SKILL/assets/README.txt.tmpl" > "$DEST/README.t
 | `scripts/archive/patch-main-0.19.53.cjs` | 0.19.53 版补丁脚本（历史） |
 | `scripts/extract-asar.cjs` | 纯 node 解包 asar（无依赖） |
 | `scripts/read-asar.cjs` | 读 asar 单文件 / `@list` 顶层（也可读 package.json 确认版本） |
+| `scripts/verify-context-window.cjs` | 上下文窗口行为断言（16 条用例：gpt-5.6 变体 / glm / deepseek / 排除项） |
 | `scripts/merge-unpacked.cjs` | 合并 app.asar.unpacked → app/（原生模块） |
 | `scripts/set-exe-icon.cjs` | rcedit 嵌 ico 到 exe |
 | `scripts/build-ico.cjs` | png → ico（重新生成 green.ico 用） |
