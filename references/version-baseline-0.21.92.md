@@ -61,7 +61,7 @@
 
 ## 部署后验证（0.21.92 实测，2026-11-09）
 
-- 部署目录：`D:\Proma-Pro-0.21.92`（旧 `D:\Proma-Pro-0.19.53` 与 `D:\Proma-Pro` 保留可回滚）；便携包 `D:\PromaPro-portable-0.21.92.zip`
+- 部署目录：`D:\Proma-Pro`（0.21.92；桌面「Proma Pro」快捷方式指此；便携包 `D:\PromaPro-portable-0.21.92.zip`）。换位记录：原 `D:\Proma-Pro` 的 0.14.23 已改名 `D:\Proma-Pro-0.14.23`，原 `D:\Proma-Pro-0.21.92` 顶替为 `D:\Proma-Pro`（改名前的约束：先关应用，并关掉 cwd 在该目录的终端，否则报 Device or resource busy）
 - 升级前数据备份：`D:\proma-pro-data-backup-0.21.92`（329MB 全量）+ `~/.proma-pro/.bak-pre-0.21.92/`（关键 json）
 - 启动后 `%APPDATA%\@proma\electron-pro` 与 `~/.proma-pro` 均在 10 分钟内被写入 → PROMA_DEV=1 隔离生效，181 条历史会话与渠道/登录态同机继承
 - exe 内嵌图标为绿色（408,142 字节 green.ico，7 档尺寸），版本号 0.21.92

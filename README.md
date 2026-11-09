@@ -67,8 +67,9 @@ Proma-fix-patch/
 
 ## 本机部署状态（2026-11-09）
 
-- 当前 Pro：`D:\Proma-Pro-0.21.92`（`start-pro.bat` 启动，PROMA_DEV=1）
-- 回滚：`D:\Proma-Pro-0.19.53`（0.19.53 patched）、`D:\Proma-Pro`（0.14.23）
+- 当前 Pro：`D:\Proma-Pro`（即 0.21.92；`start-pro.bat` 启动，PROMA_DEV=1；桌面「Proma Pro」快捷方式指这里）
+- 回滚：`D:\Proma-Pro-0.19.53`（0.19.53 patched）、`D:\Proma-Pro-0.14.23`（0.14.23，仅 `glm: ["glm-5.2"]`，glm-5.3 会落 200k）
+- 三个目录共用 `~/.proma-pro` 与 `@proma/electron-pro`，即同一个单实例锁，只能同时开一个
 - 便携包：`D:\PromaPro-portable-0.21.92.zip`（312,290,375 字节）
 - 数据备份：`D:\proma-pro-data-backup-0.21.92`（升级前全量）
 
