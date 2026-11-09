@@ -155,6 +155,16 @@ sed 's/{{VERSION}}/<版本>/g' "$SKILL/assets/README.txt.tmpl" > "$DEST/README.t
 
 验证完清理：删掉调试实例（`Stop-Process`）再正常 `start-pro.bat` 重启，别把 `--remote-debugging-port` 留在用户机器上；测试会话用 `electronAPI.deleteAgentSession` 删除。
 
+## 排障：先查实例，再查规则
+
+**症状**：升级后某个模型（如 glm-5.3）的上下文仍是旧值（200k）。
+
+1. **确认在跑哪个实例**：`Get-Process PromaPro | % Path`，对照桌面快捷方式 `TargetPath`。Pro 的多个目录共用 `~/.proma-pro` 与 `@proma/electron-pro`（同一个单实例锁），数据目录看不出区别；旧实例开着时新版会被锁直接退出。
+2. **看该实例的版本与规则**：`node read-asar.cjs <asar> package.json`（或 `<dir>/resources/app/package.json`）+ 在它的 `resources/app/dist/main.cjs` 里 `grep 'glm: \['`。0.14.23 为 `glm: ["glm-5.2"]`；补丁版应为 `glm-` / `deepseek-` 前缀。
+3. **确认没有覆盖**：渠道 models 无 `contextWindow`、会话 meta 无 `modelContextWindow`（后者只对官方 Proma 模型写入）；官方渠道启用时，后端下发值优先级最高。
+4. **不依赖 UI 验证**：0.21.92 界面没有常驻上下文分母（模型 chip tooltip 只有“渠道：X”）。用 `scripts/verify-context-window.cjs <main.cjs>` 跑行为断言，配合 pi catalog 的 `contextWindow` 值。
+5. **规范化目录**：最新版固定放 `D:\Proma-Pro`，旧版改名 `D:\Proma-Pro-<旧版本>`，快捷方式固定指 `D:\Proma-Pro\start-pro.bat`。改名/换位前必须关应用，并关掉 cwd 在该目录的终端（否则 `Device or resource busy`，见 known-pitfalls #22）。
+
 ## 何时改 patch-main.cjs
 
 新版若：
@@ -184,5 +194,5 @@ sed 's/{{VERSION}}/<版本>/g' "$SKILL/assets/README.txt.tmpl" > "$DEST/README.t
 | `assets/node_modules/` | rcedit / png-to-ico（**git 不含，部署机 npm install**） |
 | `assets/start-pro.bat.tmpl` · `README.txt.tmpl` | 启动脚本 / 部署说明模板（{{VERSION}} 占位） |
 | `references/patch-anchors.md` | 锚点详解 + 已作废补丁组 + 副作用检查清单 |
-| `references/known-pitfalls.md` | 历史踩坑（20 条） |
+| `references/known-pitfalls.md` | 历史踩坑（23 条，含“还是 200k”先查实例、目录换位、UI 无上下文分母） |
 | `references/version-baseline-0.15.7.md` · `0.19.53` · `0.21.92` | 版本基线对照 |

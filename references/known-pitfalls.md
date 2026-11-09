@@ -101,3 +101,28 @@
 **格式**：`[0,4)` pickle 长度=4、`[4,8)` headerSize、`[8,12)` payload、`[12,16)` JSON 字符串长度、`[16, 16+len)` header JSON；数据区 base = `8 + headerSize`。
 **坑**：从 `[8, ...)` 开始解析或把 `[12,16)` 当 headerSize 都会得到 `{r2 {` 之类的乱码，报 "Unexpected token"。
 **正解**：直接用仓库的 `read-asar.cjs` / `extract-asar.cjs`，别手写。
+
+## 21. “某个模型上下文还是 200k”——先查启动的是哪个实例（2026-11-09 实踩）
+
+**现象**：用户报「Proma Pro 里 glm-5.3 上下文还是 200k」，但 0.21.92 的补丁和 pi 目录都已经是 1M。
+**根因**：桌面「Proma Pro」快捷方式仍指向旧的 `D:\Proma-Pro`（0.14.23）。那版 `ONE_MILLION_CONTEXT_RULES` 只有 `glm: ["glm-5.2"]`（且没有 E1/E2），glm-5.3 落默认 200k；新部署在 `D:\Proma-Pro-0.21.92`，从没被启动过。
+**诊断顺序**（别先怀疑补丁）：`Get-Process PromaPro | % Path`（实际在跑哪个 exe）→ 快捷方式 `TargetPath` → 该目录 `resources/app/package.json` 的 version → 该版本 main.cjs 的 `glm:` / `deepseek:` 规则。
+**为什么容易误判**：Pro 的多个版本目录共用 `~/.proma-pro` 与 `@proma/electron-pro`（同一个单实例锁）。所以数据目录、会话列表、登录态在旧版和新版里看起来完全一样，**只有进程路径能区分**；旧实例还开着时，启动新版会因单实例锁直接退出。
+**正解**：把桌面快捷方式指到当前版本；更彻底的是让 `D:\Proma-Pro` 始终是最新版（见 #22），旧版本改成带版本号的目录。
+
+## 22. 目录换位/改名被占用：Device or resource busy（2026-11-09 实踩）
+
+**现象**：应用已退出，`mv D:\Proma-Pro-0.21.92 D:\Proma-Pro` 仍报 `Device or resource busy`。
+**根因**：本会话的终端 Tab 以 `D:\Proma-Pro-0.21.92` 作为 cwd（启动验证用），shell 握着目录句柄；Windows 不允许重命名被占用的目录。
+**正解**：关应用 → 关掉或切走任何 cwd 在该目录的终端/进程（`TerminalList`/`TerminalClose`，必要时 `Get-Process | ? Path -like '<dir>*'`）→ 再改名。顺序：旧版改成带版本名 → 新版的带版本目录改成规范名 → 最后改快捷方式 Target/WorkDir/Icon。
+**换位后校验**：`main.cjs` 的 md5 应等于补丁产物（0.21.92 为 `4c37431d4ce113c640272be680c2e35d`）；`.proma-dev` 残留 0；两处 icon.ico 均 408,142 字节；`app-update.yml` 仍是断源地址。
+
+## 23. 上下文窗口在 UI 里看不到，验证要靠代码链（2026-11-09 核对）
+
+**现象**：想截图证明 glm-5.3 是 1M，界面上找不到分母；模型名旁 tooltip 只有「渠道：GLM」；`window.electronAPI` 有 429 个 IPC，但没有 agent 流事件订阅（无 `onAgentStream*`），`listChannels` / `listAgentSessions` / `listActiveAgentSessionSnapshots` 都不返回 contextWindow——只有流事件 `usage_update` 里带。
+**可复现的判定链**：
+1. pi 目录 `resources/app/node_modules/@earendil-works/pi-ai/dist/providers/data/zai-coding-cn.json` 的 `chat:glm-5.3` → `contextWindow: 1000000`；
+2. 渠道 models 没有 `contextWindow` 字段、会话 meta 没有 `modelContextWindow`（该字段只在官方 Proma 模型时写入）→ `configuredContextWindow` 为空；
+3. 因此走 `Math.max(catalog 1e6, inferred 1e6)` = 1M；
+4. `scripts/verify-context-window.cjs` 直接跑 patched main.cjs，16 条断言（gpt-5.6 变体 / glm / deepseek / 排除项）全过，orig 对照 6 条失败。
+**顺带**：RDP 断开或锁屏时，PowerShell `CopyFromScreen` 会报 `The handle is invalid`；截图改用 CDP `Page.captureScreenshot`（可带 `clip` 与 `scale`），不依赖交互桌面。

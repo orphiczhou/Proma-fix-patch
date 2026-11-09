@@ -75,3 +75,11 @@
 2. `extract-asar.cjs` 解 12,670 个文件约 25 秒；`merge-unpacked.cjs` 合并 382 文件，skia 仍为 27,294,720 字节。
 3. rcedit v5 只导出 `exports`，用绝对路径 `require('…/node_modules/rcedit')` 会 MODULE_NOT_FOUND；要么在本地 `npm i rcedit`，要么 `module.paths.push(globalNodeModules)` 后按包名 require。
 4. 部署后可用 `--remote-debugging-port=<port>` 起 App 做渲染层验证（`window.electronAPI` 有 429 个 IPC 方法，含 `listChannels` / `deleteAgentSession`）；验证完要关掉该实例再正常重启，避免留下调试端口。
+
+## 常见误判与排障（2026-11-09）
+
+- **“glm-5.3 还是 200k”**：九成是启动的实例不对。0.14.23 的规则表只有 `glm: ["glm-5.2"]`；先看 `Get-Process PromaPro | % Path` 与快捷方式 `TargetPath`，再看该目录 `package.json` 版本与 main.cjs 的 `glm:` 规则。多个 Pro 目录共用 `~/.proma-pro` 与 `@proma/electron-pro`（同一个单实例锁），数据目录无法区分版本。
+- **1M 判定链（可复现）**：pi catalog `zai-coding-cn.json` 的 `chat:glm-5.3` → `contextWindow: 1000000`；渠道 models 无 `contextWindow`、会话 meta 无 `modelContextWindow`（只对官方模型写入）→ `configuredContextWindow` 为空 → `Math.max(catalog 1e6, inferred 1e6)` = 1M。`scripts/verify-context-window.cjs` 实测 16/16 PASS（orig 对照 6 FAIL）。
+- **UI 看不到分母**：0.21.92 没有常驻上下文显示，模型 chip tooltip 只有「渠道：X」；`window.electronAPI` 的 429 个 IPC 里也没有暴露 contextWindow（只有流事件 `usage_update` 携带）。别把“界面上没写 1M”当成补丁没生效。
+- **目录换位**：改名/换位前先关应用，并关掉 cwd 在该目录的终端（否则 `Device or resource busy`）。换位后校验 main.cjs md5、`.proma-dev` 残留、两处 icon.ico 408,142 字节、`app-update.yml` 断源。
+- **RDP 断开/锁屏**：PowerShell `CopyFromScreen` 报 `The handle is invalid`，截图改用 CDP `Page.captureScreenshot`。
